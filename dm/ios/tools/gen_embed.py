@@ -18,7 +18,7 @@ def pieces(n):   # the module's (x0, W, x1) as (file start, end)
     hdr = dict(l[2:].split() for l in open(f'{out}/{n}.fixups.tsv'))
     te, po = int(hdr['TEXT_END'], 16), int(hdr['PATCH_OFF'], 16)
     ko, ks = int(hdr['KEY_PAGE_OFF'], 16), int(hdr['KEY_PAGE_SIZE'], 16)
-    bin_ = os.path.abspath(f'{out}/{n}.patched.bin'); sz = os.path.getsize(bin_)
+    bin_ = os.path.abspath(f'{out}/{n}.patched.bin').replace(os.sep, '/'); sz = os.path.getsize(bin_)
     a, end = r16(te), r16(sz)
     if po < 0:   # patch area before the base (patch_nso.py FAR): W ends at the end of data, the loader supplies zero pages for bss and the key page; in the file the patch area follows at FILE_IMAGE_LEN
         fl = int(hdr['FILE_IMAGE_LEN'], 16)
@@ -37,14 +37,14 @@ for n in names:
     bin_, sz, parts = pieces(n)
     for sect, (lo, hi) in zip((f'__TEXT,__dm{n}x0', f'__DM{n}W,__img', f'__TEXT,__dm{n}x1'), parts):
         assert all(len(x) <= 16 for x in sect.split(','))
-        asm.append(f'    .section {sect}'); place(asm, bin_, sz, lo, hi)
+        asm.append(f'    .section {sect},regular,no_dead_strip'); place(asm, bin_, sz, lo, hi)
     flags.append(f'-Wl,-segprot,__DM{n}W,rw,rw')
 tab = os.path.join(out, 'nro.tsv')
 nros = [ln.split('\t')[0] for ln in open(tab) if ln.strip() and not ln.startswith('#') and not ln.startswith('refused\t')] if os.path.exists(tab) else []
 if nros:
     at, rows = [0, 0, 0], []
     for i, sect in enumerate(('__TEXT,__dm_nro_x0', '__DM_NRO_W,__img', '__TEXT,__dm_nro_x1')):
-        asm.append(f'    .section {sect}')
+        asm.append(f'    .section {sect},regular,no_dead_strip')
         for k, n in enumerate(nros):
             bin_, sz, parts = pieces(n); lo, hi = parts[i]
             if i == 0: rows.append([n])

@@ -126,6 +126,9 @@ class Progress:
 
     def stage(self, name, poll=None, step='', **kw):
         """Start the next stage, ending the current one. kw: set()'s arguments"""
+        if os.environ.get('NX_PROGRESS'):
+            import json
+            print('@NXEVENT ' + json.dumps({'name': name}), flush=True)
         with self.lock:
             self.end()
             self.k += 1; now = time.time()
@@ -2030,6 +2033,7 @@ def parse_args(argv):
     ap.add_argument('-l', '--language', help='game language, a code or a name: ja, fr, de, es, it, nl, pt, ru, ko, zh-Hans, zh-Hant, en-GB, fr-CA, es-419, pt-BR, Japanese, ... (default: the LANGUAGE setting, else English); '
                     'it must be one the game supports, which the console lists')
     ap.add_argument('--keep-extracted', action=argparse.BooleanOptionalAction, help='keep the extracted game files after the IPA is built, for the next build (default: the KEEP_EXTRACTED setting, on)')
+    ap.add_argument('--separate-romfs', action='store_true', help='like --romfs separate, and also write the RomFS image or folder to <ipa>.romfs.zip')
     ap.add_argument('--env-file', help='environment switches for a diagnostic build (one KEY=VALUE per line)')
     ap.add_argument('--gpu', help='NVN games: GPU architectures the app gets its pipeline archive for, made on this Mac with metal-tt, comma-separated: g18p (A19 / A19 Pro), or the name a device\'s log gives when the app has no archive for its GPU; '
                     'none = no archive, the device builds the bases on its first start (default: the PSO_GPUS setting; when that is empty, g18p for a game whose profile sets pso_mtl4 on, else none). '
@@ -2106,6 +2110,8 @@ def report_profile_status(g, reg, pkg_ver, derived, provisional, artifact='IPA',
 
 def main(args=None):
     args = args or parse_args([])
+    if args.separate_romfs and (args.platform or PLATFORM) != 'ios':
+        raise BuildError('--separate-romfs is only available for iOS IPAs')
     PROG.mode = progress_mode(args.progress or PROGRESS)
     global ALLOW_DAMAGED; ALLOW_DAMAGED = args.allow_damaged or ALLOW_DAMAGED
     global ALLOW_SHADER_REGRESSIONS; ALLOW_SHADER_REGRESSIONS = args.allow_shader_regressions or ALLOW_SHADER_REGRESSIONS
@@ -2113,6 +2119,9 @@ def main(args=None):
     here = Path(globals().get('__file__') or sys.argv[0]).resolve()
     if sys.version_info < (3, 12): raise BuildError('Direct RomFS image builds require Python 3.12 or newer')
     repo = find_repo(here)
+    sys.path.insert(0, str(repo))
+    from webui.build.romfs_archive import (archive_path, pack_command, prepare_archive,
+                                           verify_archive, verify_no_romfs)
     prepare_xcode = args.prepare_xcode or PREPARE_XCODE
     platform = args.platform or PLATFORM
     if platform not in ('ios', 'mac', 'mac-app'): raise BuildError(f'PLATFORM / --platform must be ios, mac or mac-app: {platform}')
@@ -2125,7 +2134,7 @@ def main(args=None):
     if mac and not keep: say('keeping the extracted game files all the same: the game runs from them on the Mac' + (' and the app is made of clones of them' if mac_pack else '')); keep = True
     if prepare_xcode and not keep: raise BuildError('--prepare-xcode requires --keep-extracted: Xcode builds from the extracted files')
     if args.xcode_workspace and not prepare_xcode: raise BuildError('--xcode-workspace requires --prepare-xcode')
-    romfs_mode = args.romfs or ROMFS
+    romfs_mode = 'separate' if args.separate_romfs else (args.romfs or ROMFS)   # the WebUI's flag selects upstream's separate mode and then archives the image
     if romfs_mode not in ('bundle', 'separate'): raise BuildError(f'ROMFS / --romfs must be bundle or separate: {romfs_mode}')
     if romfs_mode == 'separate' and mac: raise BuildError(f'--romfs separate keeps the game files off the iPhone app: it cannot be combined with --platform {platform}, which runs from the extracted files')
     if romfs_mode == 'separate' and not keep: raise BuildError('--romfs separate requires --keep-extracted: the image must remain available for the one-time transfer to the phone')
@@ -2374,6 +2383,19 @@ def main(args=None):
     run(['bash', repo / 'dm/ios/tools/build_ipa.sh', out_ipa], logs / 'build_ipa.log', env=ipa_env, on_line=watch.line)
     if not out_ipa.is_file(): raise BuildError(f'no IPA at {out_ipa}')
     PROG.end(f'{out_ipa.name}, {amount(out_ipa.stat().st_size, "B")}')
+    if args.separate_romfs:
+        PROG.add(1)
+        PROG.stage('RomFS archive')
+        archive = archive_path(out_ipa)
+        try:
+            prepare_archive(archive, rfs.source(game), g.get('romfs_marker'))
+            run(pack_command(py, repo / 'dm/ios/tools/pack_ipa.py', archive, rfs.source(game), g.get('zip_store', '')),
+                logs / 'romfs_archive.log', env=env)
+            verify_archive(archive, g.get('romfs_marker'))
+            verify_no_romfs(out_ipa)
+        except (OSError, ValueError) as error:
+            raise BuildError(f'RomFS archive: {error}') from error
+        PROG.end(f'{archive.name}, {amount(archive.stat().st_size, "B")}')
     rmtree(work / 'tmp')
     if not keep:
         say(f'deleting the extracted game files: {ex}'); rmtree(ex)

@@ -30,6 +30,10 @@ static class P {
     [DllImport("libc", SetLastError = true)] static extern int clonefile(string src, string dst, uint flags);
 
     static int Main(string[] a) {
+        if (a.Length == 3 && a[1] == "--catalog") {
+            try { return Catalog(a[0], a[2]); }
+            catch { Console.Error.WriteLine("Package metadata could not be read; check keys and integrity."); return 2; }
+        }
         bool manifest = Array.IndexOf(a, "--manifest") >= 0; a = Array.FindAll(a, s => s != "--manifest");
         bool image = Array.IndexOf(a, "--romfs-image") >= 0; a = Array.FindAll(a, s => s != "--romfs-image");
         g_allow = Array.IndexOf(a, "--allow-damaged") >= 0; a = Array.FindAll(a, s => s != "--allow-damaged");
@@ -153,6 +157,43 @@ static class P {
         Nca r = null;
         foreach (Nca n in l) if (n.Header.ContentType == t && (id == null ? r == null || n.Header.TitleId < r.Header.TitleId : n.Header.TitleId == id)) r = n;
         return r;
+    }
+
+    // Read CNMT through LibHac so filenames are never the source of title identity.
+    static int Catalog(string keys, string path) {
+        KeySet ks = ExternalKeyReader.ReadKeyFile(keys);
+        OpenNsp(ks, path); // Import the package's common tickets first.
+        var pfs = new PartitionFileSystem();
+        pfs.Initialize(new LocalStorage(path, FileAccess.Read)).ThrowIfFailure();
+        var titles = new List<object>();
+        foreach (DirectoryEntryEx e in pfs.EnumerateEntries("*", SearchOptions.Default)) {
+            if (!e.Name.EndsWith(".nca", StringComparison.OrdinalIgnoreCase)) continue;
+            using var file = new UniqueRef<IFile>();
+            pfs.OpenFile(ref file.Ref, e.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
+            var nca = new Nca(ks, file.Release().AsStorage());
+            if (nca.Header.ContentType != NcaContentType.Meta) continue;
+            var fs = nca.OpenFileSystem(NcaSectionType.Data, IntegrityCheckLevel.ErrorOnInvalid);
+            foreach (DirectoryEntryEx m in fs.EnumerateEntries("*.cnmt", SearchOptions.Default)) {
+                if (m.Size < 32 || m.Size > 16 * 1024 * 1024) throw new InvalidDataException();
+                using var mf = new UniqueRef<IFile>();
+                fs.OpenFile(ref mf.Ref, m.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
+                byte[] data = new byte[(int)m.Size];
+                mf.Get.Read(out long got, 0, data, ReadOption.None).ThrowIfFailure();
+                if (got != data.Length) throw new InvalidDataException();
+                int start = 32 + BitConverter.ToUInt16(data, 14), count = BitConverter.ToUInt16(data, 16);
+                if (start + count * 56 > data.Length) throw new InvalidDataException();
+                var contents = new List<object>();
+                for (int i = 0; i < count; i++) {
+                    int pos = start + i * 56;
+                    contents.Add(new { name = Convert.ToHexString(data, pos + 32, 16).ToLowerInvariant() + ".nca",
+                        sha256 = Convert.ToHexString(data, pos, 32).ToLowerInvariant(), type = data[pos + 54] });
+                }
+                titles.Add(new { title_id = BitConverter.ToUInt64(data, 0).ToString("X16"),
+                    version = BitConverter.ToUInt32(data, 8), type = data[12], meta = e.Name, contents });
+            }
+        }
+        Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(titles));
+        return 0;
     }
 
     // Icon: the control data holds one 256x256 JPEG per language (/icon_<language>.dat). Use the English one (American, then British); if neither exists, take the first in NACP language order
