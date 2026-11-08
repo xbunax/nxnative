@@ -11,7 +11,7 @@ Update 1.1.0 (v131072) over the base game, SDK 8.2.0. Grezzo's engine on Nintend
 | 4 GB layout: `mem_reserve 0x100000000`, `mem_alias 0x10000000`, `mem_stack 0x10000000`, `app_pool 0xCD500000` | [`game.tsv`](game.tsv) | no system resource in the NPDM: the game uses `SetHeapSize`. 13 Sentinels' partition (256 MB in front + 256 MB alias + 256 MB stack + 3.25 GB heap), "until measured" |
 | `depth_mode zero` | `game.tsv` | the game sets the near = 0 depth mode, so the pipeline bases made before it runs (the NSP script's Mac prebuild, and a [pipeline archive made offline](../../../docs/development.md#the-pipeline-archive-made-offline) for the iPhone when one is built with `DM_PSO_GPUS`) take its vertex shaders' `main0_z` entries (the host itself follows the mode the game sets) |
 
-No `dm/tools/sdk_patches.py` cut for its `sdk` build (`3ae34e68…`). No `pad_layout`: the virtual gamepad starts in the 2D layout.
+`dm/tools/sdk_patches.py`'s SDK-wide rules cut its `sdk` build (`3ae34e68…`): the node area and 2 MB alignment of large regions. No `pad_layout`: the virtual gamepad starts in the 2D layout.
 
 ## Rendering
 
@@ -72,6 +72,7 @@ General host changes first needed here; each applies to every game:
 - **The DeviceSink found by its size** (`capture` in `hle_audren.c`), the SDK 8 parameter size, `oe` notifications, the npad style event: [SDK 8: command IDs numbered differently](../../../docs/reference/audio.md#sdk-8-command-ids-numbered-differently), [SDK 8's longer `AudioRendererParameter`](../../../docs/reference/audio.md#sdk-8s-longer-audiorendererparameter), [The oe notification event and its queue](../../../docs/reference/threads.md#the-oe-notification-event-and-its-queue), [Npad style set update event](../../../docs/reference/services.md#npad-style-set-update-event).
 - **Jump tables checked on another register** (`jump_offsets`): [Offset jump tables with the bounds check on another register](../../../docs/reference/rewriter.md#offset-jump-tables-with-the-bounds-check-on-another-register).
 - **Racy crashes under CPU load and observation gates**: [05, Racy crashes](../../../docs/agents/05-debugging.md#racy-crashes-load-trace-gates).
+- **Saves from before backslash paths** (it names its files `save:\savedata0.bin`): [Saves named before backslash paths](../../../docs/reference/services.md#saves-named-before-backslash-paths).
 
 ## Open
 

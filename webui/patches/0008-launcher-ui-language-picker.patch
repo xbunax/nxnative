@@ -1,6 +1,8 @@
+diff --git a/dm/ios/Sources/Launcher.swift b/dm/ios/Sources/Launcher.swift
+index 517e5935..7aa9a927 100644
 --- a/dm/ios/Sources/Launcher.swift
 +++ b/dm/ios/Sources/Launcher.swift
-@@ -16,17 +16,24 @@
+@@ -100,17 +100,24 @@ private struct LauncherView: View {
      var body: some View {
          GeometryReader { geometry in
              HStack(spacing: 0) {
@@ -29,7 +31,7 @@
                  }
                  .padding(16)
                  .frame(width: geometry.size.width / 3, height: geometry.size.height)
-@@ -34,20 +41,20 @@
+@@ -118,21 +125,21 @@ private struct LauncherView: View {
                      ForEach(m.sections, id: \.self) { section in
                          let rows = m.rows(in: section)
                          if !rows.isEmpty {
@@ -47,6 +49,7 @@
 -                        Text("Brings back all settings this game was tested with.")
 +                        Text(m.text("Brings back all settings this game was tested with."))
                      }
+                     CloudSavesSection()
                      Section {
                          HStack {
 -                            Text("Memory available")
@@ -54,7 +57,7 @@
                              Spacer()
                              Text(ByteCountFormatter.string(fromByteCount: Int64(memory), countStyle: .memory)).monospacedDigit().foregroundStyle(.secondary)
                          }
-@@ -68,7 +75,7 @@
+@@ -153,7 +160,7 @@ private struct LauncherView: View {
      }
  
      @ViewBuilder var playButton: some View {
@@ -63,15 +66,12 @@
          if #available(iOS 26.0, *) { button.buttonStyle(.glassProminent) } else { button.buttonStyle(.borderedProminent) }
      }
  
-@@ -85,9 +92,9 @@
- public func dmShowLauncher(_ viewController: UnsafeMutableRawPointer, _ done: @convention(c) () -> Void) -> Bool {
-     guard let url = Bundle.main.resourceURL?.appendingPathComponent("dm/launcher.json"), let data = try? Data(contentsOf: url) else { return false }
+@@ -172,7 +179,7 @@ public func dmShowLauncher(_ viewController: UnsafeMutableRawPointer, _ done: @c
+     let dir = getenv("DM_APP_DM").map { URL(fileURLWithPath: String(cString: $0)) } ?? Bundle.main.resourceURL?.appendingPathComponent("dm")
+     guard let url = dir?.appendingPathComponent("launcher.json"), let data = try? Data(contentsOf: url) else { return false }
      guard let file = try? JSONDecoder().decode(SettingsFile.self, from: data), !file.settings.isEmpty else { fputs("[RED] launcher: dm/launcher.json cannot be read; starting the game\n", stderr); return false }
--    if ProcessInfo.processInfo.environment["DM_LAUNCHER"] == "0" { fputs("launcher: off (DM_LAUNCHER=0)\n", stderr); LauncherModel(file.settings).applySaved(); return false }
-+    if ProcessInfo.processInfo.environment["DM_LAUNCHER"] == "0" { fputs("launcher: off (DM_LAUNCHER=0)\n", stderr); LauncherModel(file.settings, translations: file.uiTranslations ?? [:]).applySaved(); return false }
-     let parent = Unmanaged<UIViewController>.fromOpaque(viewController).takeUnretainedValue()
 -    let model = LauncherModel(file.settings)
 +    let model = LauncherModel(file.settings, translations: file.uiTranslations ?? [:])
-     var host: UIViewController?
-     let view = LauncherView(m: model) {
-         guard let h = host else { return }
+     gameMenuModel = model   // the in-game menu shows and saves the same choices (GameMenu.swift)
+     if ProcessInfo.processInfo.environment["DM_LAUNCHER"] == "0" { fputs("launcher: off (DM_LAUNCHER=0)\n", stderr); model.applySaved(); return false }
+     let parent = Unmanaged<UIViewController>.fromOpaque(viewController).takeUnretainedValue()

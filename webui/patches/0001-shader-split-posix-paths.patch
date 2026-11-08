@@ -1,8 +1,8 @@
 diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
-index 19a776e..5eb557d 100644
+index 30057b39..0e4d84f9 100644
 --- a/dm/gfx/tools/shader_split.py
 +++ b/dm/gfx/tools/shader_split.py
-@@ -2250,7 +2250,7 @@ def main():
+@@ -3107,7 +3107,7 @@ def main():
      files, results, common = [], [], None
      for i, (romfs, mainnso) in enumerate(zip(romfs_v, main_v)):
          tag = os.path.basename(os.path.dirname(os.path.abspath(romfs))) if i else ''

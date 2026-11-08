@@ -14,7 +14,7 @@ from webui import diffapply, staging
 
 REPO = Path(__file__).resolve().parents[2]
 SOURCES = REPO / 'dm/ios/Sources'
-SWIFT = ('Launcher.swift', 'LauncherRow.swift', 'LauncherSettings.swift')
+SWIFT = ('Launcher.swift', 'LauncherRow.swift', 'LauncherSettings.swift', 'GameMenu.swift', 'DmHostingController.swift')
 OBJC = REPO / 'webui/overlays/dm/ios/Sources/DmLauncher.m'
 SCHEMA = REPO / 'docs/launcher.schema.json'
 

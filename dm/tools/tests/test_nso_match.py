@@ -135,15 +135,51 @@ class Matching(unittest.TestCase):
         with self.assertRaisesRegex(MatchError, 'original bytes differ'): Image(self.original, 0x2000).match(rule)
 
     def test_relocations_in_replacement_are_rejected(self):
-        for w in (B(0, 4), ADRP(0, 0, 0x1000), 0x58000020):
+        for w in (B(0, 0x1000), ADRP(0, 0, 0x1000), 0x58000020):
             rule = copy.deepcopy(self.rule); rule['cuts'][0] = (8, 'e00317aa', struct.pack('<I', w).hex(), 'heap')
             with self.assertRaisesRegex(ValueError, 'PC-relative'): validate(rule)
+
+    def test_replacement_branches_must_stay_inside_the_function(self):
+        def cut(w): return (8, 'e00317aa', struct.pack('<I', w).hex(), 'heap')
+        for target in (-8, 16):  # the function's first instruction and its last, from the cut at +8
+            rule = copy.deepcopy(self.rule); rule['cuts'][0] = cut(B(0, target)); validate(rule)
+        for target in (-12, 20):  # before the function and just past it
+            rule = copy.deepcopy(self.rule); rule['cuts'][0] = cut(B(0, target))
+            with self.assertRaisesRegex(ValueError, 'PC-relative'): validate(rule)
+        # The second word of a replacement counts from its own place
+        rule = copy.deepcopy(self.rule); rule['cuts'][0] = (8, 'e00317aa' + '00000014', struct.pack('<II', NOP, B(0, 16)).hex(), 'heap')
+        with self.assertRaisesRegex(ValueError, 'PC-relative'): validate(rule)
+
+    def test_trap_word_is_read_and_fingerprinted(self):
+        words = caller(0x100, 0x500)
+        def fingerprint(callee): return Image(image({0x100: words, 0x500: callee}), 0x2000).fingerprint(0x100)
+        trapped = fingerprint([0xd2800020, RET, 0xe7ffdefe])
+        self.assertNotEqual(trapped, fingerprint([0xd2800020, RET, 0xd4200000]))   # the word itself counts, not the brk it is read as
+        with self.assertRaisesRegex(MatchError, 'undecodable'): fingerprint([0xd2800020, RET, 0xffffffff])  # any other undecodable word still refuses
 
     def test_no_boundaries_and_ambiguous_match_are_reported(self):
         for img in (bytearray(0x40), image({0x100: [RET]})):
             messages = []
             self.assertEqual(resolve(img, len(img), [self.rule], messages.append), [])
             self.assertTrue(messages[0].startswith('[RED] '))
+
+    def test_frame_step_rule_locates_its_function_or_nothing(self):
+        # MATCH_FRAME_STEP: the stub gets the start of the one matching function, wherever the build put it; none or two give a red line and no stub
+        from nso_match import locate_stub
+        stub = dict(name='step', size=self.rule['size'], fingerprints=self.rule['fingerprints'], stub=lambda ctx: None)
+        moved = image({0x800: caller(0x800, 0x1200, 0x2980), 0x1200: [0xd2800020, RET]})
+        messages = []
+        self.assertEqual(locate_stub(moved, 0x2000, [stub], messages.append), (stub, 0x800))
+        self.assertFalse([m for m in messages if m.startswith('[RED]')], messages)
+        duplicate = image({0x100: caller(0x100, 0x500), 0x800: caller(0x800, 0x500), 0x500: [0xd2800020, RET]})
+        for img in (duplicate, image({0x100: [RET]})):
+            messages = []
+            self.assertIsNone(locate_stub(img, 0x2000, [stub], messages.append))
+            self.assertTrue(messages[0].startswith('[RED] frame step'), messages)
+        self.assertIsNone(locate_stub(moved, 0x2000, [], messages.append))
+        with self.assertRaisesRegex(ValueError, 'one frame step'): locate_stub(moved, 0x2000, [stub, dict(stub, name='other')], messages.append)
+        with self.assertRaisesRegex(ValueError, 'stub'): locate_stub(moved, 0x2000, [dict(stub, stub=None)], messages.append)
+        with self.assertRaisesRegex(ValueError, 'name, size'): locate_stub(moved, 0x2000, [dict(stub, cuts=[])], messages.append)
 
     def test_overlapping_rules_are_rejected(self):
         other = dict(self.rule, name='another patch')
@@ -228,27 +264,30 @@ class Matching(unittest.TestCase):
             with patch.dict(os.environ, DM_GAME=gid): exec(code, ns)
             self.assertFalse((root / 'own').exists())
 
-    def test_sdk_wide_rules_skip_the_games_own_builds(self):
-        # sdk_patches.py's MATCH_CUTS apply to every game's sdk of a build with no CUTS, unless the selected profile's build rows name it; a miss is not red
+    def test_sdk_wide_rules_apply_to_every_build_without_cuts(self):
+        # sdk_patches.py's MATCH_CUTS apply to every game's sdk of a build with no CUTS, the selected profile's own builds too (without a match.tsv: they lost nothing); an empty
+        # CUTS list keeps Nintendo's code; a miss is not red
         source = TOOLS / 'patch_nso.py'; tree = ast.parse(source.read_text())
         start = next(i for i, n in enumerate(tree.body) if isinstance(n, ast.Assign) and ast.unparse(n.targets[0]) == 'PATCH_FILES')
         end = next(i for i, n in enumerate(tree.body[start:], start) if isinstance(n, ast.Assign) and ast.unparse(n.targets[0]) == 'KEYS')
         code = compile(ast.Module(body=tree.body[start:end], type_ignores=[]), str(source), 'exec')
-        gid, own = '0100000000000001', 'cd' * 16
+        gid, own, kept = '0100000000000001', 'cd' * 16, 'ef' * 16
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); (root / 'tools').mkdir()
-            (root / 'tools/sdk_patches.py').write_text(f'MATCH_CUTS = {{"sdk": [{self.rule!r}]}}\n')
+            (root / 'tools/sdk_patches.py').write_text(f'CUTS = {{{kept!r}: []}}\nMATCH_CUTS = {{"sdk": [{self.rule!r}]}}\n')
             g = root / 'games' / gid; g.mkdir(parents=True)
             (g / 'game.tsv').write_text(f'build\tv0\t1.0.0\tmain={"ab" * 16}\tsdk={own}\n')
-            for name, bid, gamed, expected in (('sdk', '00' * 16, gid, ADD), ('sdk', own, gid, MOV), ('sdk', own, '0100000000000002', ADD), ('main', '00' * 16, gid, MOV)):
+            for name, bid, gamed, expected in (('sdk', '00' * 16, gid, ADD), ('sdk', own, gid, ADD), ('sdk', own, '0100000000000002', ADD), ('sdk', kept, gid, MOV),
+                                               ('main', '00' * 16, gid, MOV)):
                 with self.subTest(module=name, build=bid, game=gamed):
                     img, out = bytearray(self.original), root / 'out' / f'{name}{bid}{gamed}'
                     ns = dict(__file__=str(root / 'tools/patch_nso.py'), os=os, glob=glob, importlib=importlib,
                               MOD=SimpleNamespace(build_id=bytes.fromhex(bid)), IMG=img, TEXT_END=0x2000, NAME=name, outdir=str(out))
                     with patch.dict(os.environ, DM_GAME=gamed): exec(code, ns)
                     self.assertEqual(struct.unpack_from('<I', img, 0x108)[0], expected)
-                    if expected == ADD:
+                    if expected == ADD and (bid, gamed) != (own, gid):
                         self.assertEqual([l.split('\t')[:3] for l in (out / 'sdk.match.tsv').read_text().splitlines()[1:]], [['sdk', 'heap', '0x108']])
+                    else: self.assertFalse((out / 'sdk.match.tsv').exists())
             printed = io.StringIO()
             with contextlib.redirect_stdout(printed):
                 ns = dict(__file__=str(root / 'tools/patch_nso.py'), os=os, glob=glob, importlib=importlib,

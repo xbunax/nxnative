@@ -7,11 +7,12 @@ Update 2.0.2 (v393216) over the base game, SDK 19.3.11 (NVN 55). Game Freak's Tr
 | Setting | Where | Why |
 |---|---|---|
 | Allocator address space 12 GB → 3.94 GB | the host's StandardAllocator cap (`hle_svc.c`), every build | `StandardAllocator::Initialize(nullptr, 0x300000000)` does not fit a phone; see [Memory](#memory) |
-| Node area cut 1 GB → 62 MB | `dm/tools/sdk_patches.py`, `sdk` build `df7a3960…` (`sdk+0x1423fc` / `+0x142468`) | the alias region must hold the node area and the allocator's region |
+| Node area cut 1 GB → 62 MB | `dm/tools/sdk_patches.py` SDK-wide rules, `sdk` build `df7a3960…` (`sdk+0x1423fc` / `+0x142468`) | the alias region must hold the node area and the allocator's region |
 | 5 GB guest layout: `mem_reserve 0x140000000`, `mem_alias 0x110000000`, `mem_stack 0x10000000`, `app_pool 0xCD500000` | [`game.tsv`](game.tsv) | the 4.25 GB alias region holds 62 MB + 4 GB (SDK 19 puts the region 4 MB aligned right after the node area); the 5 GB block Tears of the Kingdom runs in |
 | `mem_map_limit on` | `game.tsv` | the SDK keeps the pages of `nninitStartup`'s probe mapped until a map fails; the pool is enforced as on Horizon, so it gives them back |
 | Integer output rows `b767103838f729ca`, `c509e77bef5b4249` | [`shader_facts_manual.tsv`](shader_facts_manual.tsv) | no PC version, so the translator declares every output float; these two pixel shaders (variations 0 and 3 of one BNSH in the `imgui.trsha` pack, the `env_ikkaku` system shaders) write an integer ID (255, or one taken from the game's uniforms) to output 1, an `R8_UI` target; Metal refused them on the character creation screen |
 | `pad_layout simple` | `game.tsv` | the 2D gamepad layout |
+| `depth_mode zero` | `game.tsv` | the game sets near = 0 with `nvnDeviceSetDepthMode`; see [Pipeline bases made before the game runs](#pipeline-bases-made-before-the-game-runs) |
 
 `render_cond` stays off: it changes nothing in this game.
 
@@ -59,16 +60,48 @@ Each item was found from a red line or a pass dump on the way through the langua
 - **Current: the atomic max runs on texture 302 itself** (native texture atomics, [Image atomics](../../../docs/reference/shaders.md#image-atomics)), so its results reach the passes that read the image; before, they went to a scratch buffer that nothing read. Chain `0ce4b5e8aefb` builds all 28,603 shaders. Update 2.0.2 from a fresh save on the docs' route, headless on the Mac under Metal API validation (2026-10-27): `image atomics on image slot 1, texture ID 302 (target 4, block-linear, 2211840 bytes)`, then on to frame 12,000 with no validation error, GPU fault or new red line. The picture of that scene was not compared, and the iPhone freeze of GitHub issue #149 is not re-checked.
 - **Current validation (2026-10-25):** with the bounds fix and strict descriptor-format/bindless-handle checks, chain `467efdfd0b62` rebuilt all 28,603 shaders for Mac and iPhone with zero failures and no undecoded bindings. After rebuilding the host, update 2.0.2 ran for 240.1 seconds / 6,987 frames around the station from an isolated copy of the save, with movement and camera changes, shader validation disabled, and no observed freeze, GPU page fault, missing shader or atomic-binding rejection. The log confirmed the new chain and the 480x270, three-layer image using 3 MiB scratch. This is a Mac smoke test, not confirmation of the reported iPhone/version cases or the station-to-world transition. Artifacts are in the NSP folder's `0100F43008C44000-work/pr178/` (shader libraries and `gameplay/`).
 
+## Pipeline bases made before the game runs
+
+- **Resolved: the Mac app's bundled pipeline archive was built for the wrong depth mode** (GitHub issue #614, MacBook Air M4, Mac app at `38b8907`). The game calls `nvnDeviceSetDepthMode` with near = 0 (`[nvn] depth mode near=0` in the Mac report and in both iPhone logs of issues #149 and #292), and the profile had no `depth_mode`, so the NSP script's prebuild made the bundled archive's 1.2 GB of bases for near = −w (`main0` vertex entries). The host follows the game's mode and found none of them: `pipeline archive bundled with the app: made for … depth near=-w … this run needs … depth near=0 … the device builds the bases it does not hold`. Every base then compiled on the Mac while playing (`archive lookups … found none 6`, `bases compiled 3 / 258.6 ms` up to frame 1200), one cause of the hitches on new moves and effects that the report describes. **Current:** `depth_mode zero`, as Legends: Arceus, Scarlet and Violet set; it changes only the bases made offline (the shader input digest and the libraries are unchanged), so an app or IPA packed again gets an archive the game uses. **Open:** not yet re-measured with a repacked app; shader library loads (`shader libraries 12` in the report's 105 ms frame) are not covered by the archive. The report's other symptom, frame intervals alternating 33 / 50 ms in fullscreen with the GPU at 23–25 ms a frame (`old frames dropped by merging 157` per 300 ticks, gone while macOS screen capture runs), is not explained by this; see [Frame latency 2 for the display link in fullscreen](../../../docs/reference/frame-rate.md#frame-latency-2-for-the-display-link-in-fullscreen).
+
 ## Mac routes
 
 - A fresh save reaches play in Lumiose City with `DM_KBD=Taylor DM_KEYS="f450:A,f1200:LRight~1,f1600:A,f1900:Down,f2000:Down,f2100:A,f2400:A*80/90"`.
 - A save made there continues with `DM_KEYS="f300:A*3/150"` (play from about frame 600), and `LUp~12` then walks along the platform.
 - A 5-minute walk: GPU about 6 ms a frame, no crash.
 
+## Build performance
+
+- **Resolved: a chain-only update rebuilt the offline pipeline archive.** The mechanism: [archive reuse across chains](../../../docs/reference/shaders.md#offline-pipeline-archive-rebuilt-after-a-chain-only-update).
+- **Measured, 2026-10-31, one run each:** Apple M2 Max, macOS 26.6, Xcode 27.0, Mac app build with `--allow-other-metal`. A temporary comment in a chain tool changed the chain version and no shader output, so both runs compiled from the same 26,029 bases and library bytes. A chain change that alters a library in the archive still rebuilds it.
+
+| Archive stage after the chain update | Time |
+|---|---:|
+| Old key: `metal-tt` ran again | 462.78 s (7m43s) |
+| Content key: archive reused | 10.10 s |
+| Saved | 452.68 s (7m33s), 97.8% |
+
+- **Current:** this game's profile does not set `pso_mtl4`, so its default iOS build makes no offline archive and gains nothing from this stage. No gameplay run used the reused archive; `regress.py check` compared its 28,603 shaders only, since the game has no `smoke.tsv`.
+
+### Shader extraction reuse
+
+- **Resolved: a translation-only update repeated the shader split.** The mechanism: [shader extraction reuse](../../../docs/reference/shaders.md#shader-extraction-reruns-after-translation-only-updates).
+- **Measured, 2026-11-01, one run each:** same machine and toolchain, with this game's 2.0.2 NSPs and DLC unchanged and the same comment-only kind of chain edit. The old extractor's fresh package was byte-identical to the reused one.
+
+| Split after the chain update | Time |
+|---|---:|
+| Old key: the split ran again | 276.04 s (4m36s) |
+| New key: package reused | 0.64 s |
+| Saved | 275.40 s (4m35s), 99.8% |
+
+- **Current:** this game's packs go through its own Oodle decoder in the Mac host, so an update that also changes another host source still splits again. The host itself is rebuilt for each chain, about 16 s of that stage in a full build.
+
 ## Found on this game
 
 General host changes first needed here; each applies to every game:
 
+- **Shader extraction reuse after translation-only updates:** [Shader extraction reruns after translation-only updates](../../../docs/reference/shaders.md#shader-extraction-reruns-after-translation-only-updates).
+- **Offline pipeline archive reuse across chains:** [Offline pipeline archive rebuilt after a chain-only update](../../../docs/reference/shaders.md#offline-pipeline-archive-rebuilt-after-a-chain-only-update).
 - **The pool enforced as on Horizon** (`mem_map_limit`, `hle_svc.c`): [the profile keys](../README.md#keys), [Maps past the application pool fail as on Horizon](../../../docs/reference/memory.md#maps-past-the-application-pool-fail-as-on-horizon).
 - **Trinity packs decoded with the game's own Oodle** (`trpfs_jobs` / `trinity_shaders`, `hle_oodle.c`, `DM_OODLE_HOST` / `DM_OODLE_MODULES`, set by the NSP script for any game with `ONEPACK` files): [BNSH in Trinity packs](../../../docs/reference/shaders.md#bnsh-in-trinity-packs), [01, Compressed RomFS content](../../../docs/agents/01-extract.md#compressed-romfs-content).
 - **SDK 19 calls:** csrng bytes, `GetAudioOutBufferCount` from the host queue, NVN state getters, `WaitForAddress` type 3, `OP_FENCE_SYNC`: [Cryptographically random bytes](../../../docs/reference/services.md#cryptographically-random-bytes), [AudioOut buffer count from the host queue](../../../docs/reference/audio.md#audioout-buffer-count-from-the-host-queue), [State read back through NVN getters](../../../docs/reference/nvn-objects.md#state-read-back-through-nvn-getters), [WaitForAddress type 3](../../../docs/reference/threads.md#waitforaddress-type-3-64-bit-wait-if-equal), [Fence syncs recorded in command buffers](../../../docs/reference/nvn-objects.md#fence-syncs-recorded-in-command-buffers).
@@ -80,6 +113,7 @@ General host changes first needed here; each applies to every game:
 
 ## Open
 
+- **iPhone GPU page faults** (GitHub issues #149, iPhone 16 Pro, and #292, iPhone 17): the picture freezes 30–60 s into the opening or in 3D cutscenes (the gate into Lumiose after the station, the stolen-bag scene, the hotel balcony) with `kIOGPUCommandBufferCallbackErrorPageFault`, after which iOS ignores every submission. Both logs come from builds before native texture atomics (they print `image atomics … not followed, the atomics go to a scratch buffer`), so they ran the scratch path that [Image atomics](#rendering) replaced. Not reproduced on the Mac; not re-checked on an iPhone since. The Metal 4 commit feedback names no pass, so the faulting pass is unknown.
 - The driver-segment word `0x640`, added to the vertex ID by 58 shaders, stays 0 until what the driver puts there is known.
 - Transform feedback: only plain array draws are captured; indexed, indirect or instanced ones give a red line. Feedback layouts other than one output per buffer from x on get a red line and no capture entry point.
 - `c85de3713170e519` ORs bit fields into output 0 and has not been seen with an integer attachment (no row).

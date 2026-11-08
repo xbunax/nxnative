@@ -31,6 +31,10 @@ class PatchedScripts(unittest.TestCase):
 
     def python(self, code):
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
+        if os.name == 'nt':
+            # The Mac entry point imports tree_tar. These argument/AST tests never
+            # take its POSIX lock; the Windows build uses its own entry point.
+            code = "import sys, types; sys.modules['fcntl'] = types.ModuleType('fcntl')\n" + code
         return subprocess.run([sys.executable, '-c', code], cwd=self.tree, capture_output=True, text=True, env=env)
 
     def test_patched_python_compiles(self):

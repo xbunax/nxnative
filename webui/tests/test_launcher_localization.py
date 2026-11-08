@@ -37,7 +37,7 @@ class LauncherLocalization(unittest.TestCase):
             columns = line.split('\t')
             required.update(value for value in columns[5:8] if value)
             if columns[1] == 'choice' and columns[2] != 'languages':
-                required.update(option.split('=', 1)[1] for option in columns[2].split(','))
+                required.update(option.split('?', 1)[0].split('=', 1)[1] for option in columns[2].split(','))
         # Importing nacp only reads the repository's language names; no game data.
         spec = importlib.util.spec_from_file_location('ui_nacp', REPO / 'dm/tools/nacp.py')
         nacp = importlib.util.module_from_spec(spec)

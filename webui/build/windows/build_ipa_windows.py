@@ -227,7 +227,7 @@ def main():
         done = sum(1 for p in (host / 'objects').glob('*.o') if p.stat().st_mtime >= host_started - 5)
         return f'host_compile {done}/{host_total} sources'
     run('host_compile', [python, repo / 'webui/build/windows/ios_cross_compile.py', '--clang', clang, '--sdk', sdk,
-                         '--profile', profile, '--out', host, '--jobs', min(a.jobs, 8)], progress=host_progress)
+                         '--metal', a.metal.resolve(), '--profile', profile, '--out', host, '--jobs', min(a.jobs, 8)], progress=host_progress)
     run('embed_generate', [python, repo / 'dm/ios/tools/gen_embed.py', patched, host / 'embed.S', *g.words('modules')], host / 'embed_link_flags.txt')
     run('embed_assemble', [clang, '-target', 'arm64-apple-ios26.0', '-isysroot', sdk, '-mcpu=apple-a16',
                            '-x', 'assembler', '-c', host / 'embed.S', '-o', host / 'embed.o'])

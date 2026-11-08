@@ -3,7 +3,10 @@
 // (DM_ENV_FILE_KEYS, DM_ENV_LAUNCH_KEYS, DM_SAVED_CHOICES, DM_LAUNCHER) and exports the same entry point (front_ios.m dm_show_launcher). It is a port, line for line where it can be:
 // when upstream changes the Swift files, change this one with them (webui/tests/test_launcher_parity.py compares the two and fails until they agree).
 #import <UIKit/UIKit.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <objc/message.h>
+#import "CloudSaves.h"
+#import "DmGameMenu.h"
 #include <math.h>
 #include <os/proc.h>
 #include <stdio.h>
@@ -64,6 +67,7 @@ static NSSet<NSString *> *keyList(const char *name) {   // a space-separated lis
 @property(readonly) NSDictionary<NSString *, NSString *> *uiTranslations;
 - (instancetype)initWithSettings:(NSArray<NSDictionary *> *)settings translations:(NSDictionary *)translations;
 - (NSString *)text:(NSString *)english;
+- (void)choose:(NSDictionary *)setting value:(NSString *)value;
 @end
 
 @implementation DmLauncherModel
@@ -146,6 +150,17 @@ static NSSet<NSString *> *keyList(const char *name) {   // a space-separated lis
     }
 }
 // DM_LAUNCHER=0: no screen, but the saved choices still apply (only DM_SAVED_CHOICES=0 ignores them); nothing is written
+- (void)choose:(NSDictionary *)s value:(NSString *)v {
+    NSString *env = str(s, @"env");
+    if ([_fixed containsObject:env] || !accepts(s, v)) return;
+    _values[env] = v;
+    if (!_ignoreSaved) {
+        NSString *key = [@"launcher." stringByAppendingString:env];
+        if (isDefault(s, v)) [_defaults removeObjectForKey:key]; else [_defaults setObject:v forKey:key];
+    }
+    setenv(env.UTF8String, v.UTF8String, 1);
+    fprintf(stderr, "launcher: %s=%s (in-game menu)\n", env.UTF8String, v.UTF8String);
+}
 - (void)applySaved {
     for (NSDictionary *s in _settings) {
         NSString *env = str(s, @"env"), *v = [self valueOf:s];
@@ -154,6 +169,66 @@ static NSSet<NSString *> *keyList(const char *name) {   // a space-separated lis
     }
 }
 @end
+
+// GameMenu.swift: keep the settings-screen model for the live menu, even with DM_LAUNCHER=0.
+static DmLauncherModel *gameMenuModel;
+static UIMenuElement *gameMenuRow(DmLauncherModel *m, NSDictionary *s) {
+    NSString *env = str(s, @"env"), *now = [m valueOf:s];
+    BOOL fixed = [m.fixed containsObject:env];
+    void (^pick)(NSString *) = ^(NSString *value) {
+        [m choose:s value:value]; dm_setting_live(env.UTF8String, value.UTF8String);
+    };
+    if ([str(s, @"kind") isEqualToString:@"toggle"]) {
+        UIAction *action = [UIAction actionWithTitle:[m text:str(s, @"label")] image:nil identifier:nil handler:^(UIAction *a) {
+            pick([now isEqualToString:onValue(s)] ? offValue(s) : onValue(s));
+        }];
+        action.state = [now isEqualToString:onValue(s)] ? UIMenuElementStateOn : UIMenuElementStateOff;
+        action.attributes = fixed ? UIMenuElementAttributesDisabled : 0;
+        if (fixed) action.subtitle = [m text:@"Set in env.txt"];
+        return action;
+    }
+    NSMutableArray *actions = [NSMutableArray array];
+    NSString *current = now;
+    for (NSArray *option in s[@"options"] ?: @[]) {
+        UIAction *action = [UIAction actionWithTitle:[m text:option[1]] image:nil identifier:nil handler:^(UIAction *a) { pick(option[0]); }];
+        action.attributes = fixed ? UIMenuElementAttributesDisabled : 0;
+        action.state = [option[0] isEqualToString:now] ? UIMenuElementStateOn : UIMenuElementStateOff;
+        if (action.state == UIMenuElementStateOn) current = [m text:option[1]];
+        [actions addObject:action];
+    }
+    NSString *subtitle = fixed ? [NSString stringWithFormat:@"%@, %@", current, [m text:@"set in env.txt"]] : nil;
+    UIMenu *menu = [UIMenu menuWithTitle:[m text:str(s, @"label")] image:nil identifier:nil options:UIMenuOptionsSingleSelection children:actions];
+    menu.subtitle = subtitle;
+    return menu;
+}
+static NSArray<UIMenuElement *> *gameMenuItems(void) {
+    NSArray *names = @[@"2D", @"3D", @"Tap"];
+    NSMutableArray *layouts = [NSMutableArray array];
+    for (int layout = 0; layout < 3; layout++) if (dm_pad_layout_offered(layout)) {
+        UIAction *action = [UIAction actionWithTitle:names[layout] image:nil identifier:nil handler:^(UIAction *a) { dm_pad_layout_set(layout); }];
+        action.state = dm_pad_layout() == layout ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [layouts addObject:action];
+    }
+    UIMenu *layout = [UIMenu menuWithTitle:gameMenuModel ? [gameMenuModel text:@"Controller layout"] : @"Controller layout" image:nil identifier:nil options:UIMenuOptionsSingleSelection children:layouts];
+    NSMutableArray *items = [NSMutableArray array];
+    BOOL placed = NO;
+    for (NSString *section in gameMenuModel.sections) {
+        NSMutableArray *rows = [NSMutableArray array];
+        if ([section isEqualToString:@"Controls"]) { [rows addObject:layout]; placed = YES; }
+        for (NSDictionary *s in [gameMenuModel rowsInSection:section]) {
+            NSString *kind = str(s, @"kind");
+            if (([kind isEqualToString:@"choice"] || [kind isEqualToString:@"toggle"]) && dm_setting_live(str(s, @"env").UTF8String, NULL)) [rows addObject:gameMenuRow(gameMenuModel, s)];
+        }
+        if (rows.count) [items addObject:[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:rows]];
+    }
+    if (!placed) [items insertObject:[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[layout]] atIndex:0];
+    return items;
+}
+void *dm_game_menu(void) {
+    NSString *title = gameMenuModel ? [gameMenuModel text:@"More settings on the start screen"] : @"";
+    UIDeferredMenuElement *deferred = [UIDeferredMenuElement elementWithUncachedProvider:^(void (^done)(NSArray<UIMenuElement *> *)) { done(gameMenuItems()); }];
+    return (void *)CFBridgingRetain([UIMenu menuWithTitle:title children:@[deferred]]);
+}
 
 // ---- screen (Launcher.swift: LauncherView, LauncherRow.swift: SettingRow) ----
 static UIImage *appIcon(void) {
@@ -166,7 +241,7 @@ static UIImage *appIcon(void) {
 }
 static NSString *info(NSString *key) { id v = [NSBundle.mainBundle objectForInfoDictionaryKey:key]; return [v isKindOfClass:NSString.class] ? v : nil; }
 
-@interface DmLauncherController : UIViewController <UITableViewDataSource, UITableViewDelegate>
+@interface DmLauncherController : UIViewController <UITableViewDataSource, UITableViewDelegate, UIDocumentPickerDelegate>
 - (instancetype)initWithModel:(DmLauncherModel *)model play:(void (^)(void))play;
 @end
 
@@ -179,6 +254,7 @@ static NSString *info(NSString *key) { id v = [NSBundle.mainBundle objectForInfo
     UILabel *_memory;
     UILabel *_titleLabel, *_versionLabel, *_languageLabel;
     UIButton *_playControl, *_languageControl;
+    NSString *_cloudFolder, *_cloudNote;
 }
 - (instancetype)initWithModel:(DmLauncherModel *)model play:(void (^)(void))play {
     if (!(self = [super init])) return nil;
@@ -274,10 +350,37 @@ static NSString *info(NSString *key) { id v = [NSBundle.mainBundle objectForInfo
 }
 - (NSString *)memoryText { return [NSByteCountFormatter stringFromByteCount:(long long)os_proc_available_memory() countStyle:NSByteCountFormatterCountStyleMemory]; }
 - (void)updateMemory { _memory.text = [self memoryText]; }
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)t { return _sections.count + 2; }
-- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)n { return n < (NSInteger)_sections.count ? [_m rowsInSection:_sections[n]].count : 1; }
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIInterfaceOrientationMaskAll; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)t { return _sections.count + 3; }
+- (NSInteger)tableView:(UITableView *)t numberOfRowsInSection:(NSInteger)n {
+    if (n < (NSInteger)_sections.count) return [_m rowsInSection:_sections[n]].count;
+    if (n == (NSInteger)_sections.count + 1) {
+        BOOL stale = NO;
+        _cloudFolder = dm_cloud_saves_path(&stale) ?: @"";
+        if (stale && !_cloudFolder.length) _cloudNote = @"The folder you chose before is no longer readable (the app was signed differently). Please choose it again.";
+        return _cloudFolder.length ? 3 : 2;
+    }
+    return 1;
+}
 - (NSString *)tableView:(UITableView *)t titleForHeaderInSection:(NSInteger)n { return n < (NSInteger)_sections.count ? [_m text:_sections[n]] : nil; }
-- (NSString *)tableView:(UITableView *)t titleForFooterInSection:(NSInteger)n { return n == (NSInteger)_sections.count ? [_m text:@"Brings back all settings this game was tested with."] : nil; }
+- (NSString *)tableView:(UITableView *)t titleForFooterInSection:(NSInteger)n {
+    if (n == (NSInteger)_sections.count) return [_m text:@"Brings back all settings this game was tested with."];
+    if (n == (NSInteger)_sections.count + 1) return [_m text:_cloudNote.length ? _cloudNote : @"Choose a folder in iCloud Drive, and the same one in the Mac app's Cloud saves. The save comes in when the game starts and goes out after each save; a save that is replaced is kept in save-backups."];
+    return nil;
+}
+- (void)chooseCloudFolder {
+    UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeFolder] asCopy:NO];
+    picker.allowsMultipleSelection = NO; picker.delegate = self;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    if (!urls.firstObject) return;
+    _cloudNote = dm_store_cloud_saves(urls.firstObject)
+        ? @"Saved. The game uses this folder when you press Play."
+        : @"That folder could not be remembered — try a different one.";
+    [self reload];
+}
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {}
 - (UITableViewCell *)tableView:(UITableView *)t cellForRowAtIndexPath:(NSIndexPath *)p {
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
     if (p.section == (NSInteger)_sections.count) {   // Reset to tested defaults
@@ -287,7 +390,28 @@ static NSString *info(NSString *key) { id v = [NSBundle.mainBundle objectForInfo
         [b addAction:[UIAction actionWithHandler:^(UIAction *a) { [self->_m reset]; [self reload]; }] forControlEvents:UIControlEventTouchUpInside];
         [self pin:b in:cell]; return cell;
     }
-    if (p.section == (NSInteger)_sections.count + 1) {   // Memory available
+    if (p.section == (NSInteger)_sections.count + 1) {   // Cloud saves (CloudSavesSection)
+        if (p.row == 0) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:nil];
+            cell.textLabel.text = [_m text:@"Cloud saves"];
+            cell.detailTextLabel.text = _cloudFolder.length ? _cloudFolder.lastPathComponent : [_m text:@"Off"];
+            cell.detailTextLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        } else {
+            UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+            button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
+            if (p.row == 1) {
+                [button setTitle:[_m text:_cloudFolder.length ? @"Choose a different folder…" : @"Choose a folder in iCloud Drive…"] forState:UIControlStateNormal];
+                [button addAction:[UIAction actionWithHandler:^(UIAction *a) { [self chooseCloudFolder]; }] forControlEvents:UIControlEventTouchUpInside];
+            } else {
+                [button setTitle:[_m text:@"Turn off cloud saves"] forState:UIControlStateNormal];
+                [button setTitleColor:UIColor.systemRedColor forState:UIControlStateNormal];
+                [button addAction:[UIAction actionWithHandler:^(UIAction *a) { dm_clear_cloud_saves(); self->_cloudNote = @""; [self reload]; }] forControlEvents:UIControlEventTouchUpInside];
+            }
+            [self pin:button in:cell];
+        }
+        return cell;
+    }
+    if (p.section == (NSInteger)_sections.count + 2) {   // Memory available
         UILabel *name = [self labelWithText:[_m text:@"Memory available"] style:UIFontTextStyleBody secondary:NO];
         _memory = [self labelWithText:[self memoryText] style:UIFontTextStyleBody secondary:YES];
         _memory.font = [UIFont monospacedDigitSystemFontOfSize:_memory.font.pointSize weight:UIFontWeightRegular];
@@ -361,7 +485,9 @@ static NSString *info(NSString *key) { id v = [NSBundle.mainBundle objectForInfo
 
 // Shows the launcher over the root view controller and calls done once the settings are in the environment; false (done is not called) when there is no launcher
 bool dm_show_launcher(void *viewController, void (*done)(void)) {
-    NSURL *url = [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"dm/launcher.json"];
+    const char *dm = getenv("DM_APP_DM");
+    NSURL *dir = dm ? [NSURL fileURLWithPath:[NSString stringWithUTF8String:dm]] : [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"dm"];
+    NSURL *url = [dir URLByAppendingPathComponent:@"launcher.json"];
     NSData *data = url ? [NSData dataWithContentsOfURL:url] : nil;
     if (!data) return false;
     NSDictionary *file = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
@@ -373,10 +499,11 @@ bool dm_show_launcher(void *viewController, void (*done)(void)) {
         for (NSString *key in @[@"env", @"kind", @"label", @"note", @"default"]) if (valid && ![s[key] isKindOfClass:NSString.class]) valid = NO;
     }
     if (!valid) { fputs("[RED] launcher: dm/launcher.json cannot be read; starting the game\n", stderr); return false; }
-    const char *off = getenv("DM_LAUNCHER");
-    if (off && !strcmp(off, "0")) { fputs("launcher: off (DM_LAUNCHER=0)\n", stderr); [[[DmLauncherModel alloc] initWithSettings:list translations:file[@"uiTranslations"]] applySaved]; return false; }
-    UIViewController *parent = (__bridge UIViewController *)viewController;
     DmLauncherModel *model = [[DmLauncherModel alloc] initWithSettings:list translations:file[@"uiTranslations"]];
+    gameMenuModel = model;
+    const char *off = getenv("DM_LAUNCHER");
+    if (off && !strcmp(off, "0")) { fputs("launcher: off (DM_LAUNCHER=0)\n", stderr); [model applySaved]; return false; }
+    UIViewController *parent = (__bridge UIViewController *)viewController;
     __block DmLauncherController *host = nil;
     host = [[DmLauncherController alloc] initWithModel:model play:^{
         DmLauncherController *h = host;

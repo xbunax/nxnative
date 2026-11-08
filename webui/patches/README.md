@@ -31,6 +31,16 @@ no longer names the per-game `dmsh_chain.h`, while keeping `-framework MetalFX`.
 `scripts/build_ipa_from_nsp.py` keeps the `--separate-romfs` and
 `@NXEVENT` hooks beside upstream's new `--platform` option.
 
+## 2026-11-08 port notes
+
+All nine patches are regenerated against `1794a35a`. The embedded-code hook
+keeps upstream's program tags, back patch areas and JIT images while preserving
+POSIX paths and no_dead_strip. The extractor catalog hook runs inside upstream's
+new Run wrapper, retaining its missing-key and damaged-filesystem handling.
+The NSP hook retains both --work-dir and --separate-romfs. The language-picker
+hook keeps the new cloud-save section, multi-program DM_APP_DM lookup and the
+game-menu model instead of restoring the old launcher entry point.
+
 ## Patch 0005 notes (was 0009, then 0007)
 
 The original fork patch added a top-level `import json` because the WebUI

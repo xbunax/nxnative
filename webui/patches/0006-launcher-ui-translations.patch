@@ -1,6 +1,8 @@
+diff --git a/dm/games/settings.py b/dm/games/settings.py
+index bff40091..cfd51a1e 100644
 --- a/dm/games/settings.py
 +++ b/dm/games/settings.py
-@@ -120,7 +120,8 @@
+@@ -129,7 +129,8 @@ def build(gid, patched, control):
              s.update(on=on_off[0], off=on_off[1], default=on_off[0] if s['default'] == '1' else on_off[1])   # the default as the value the variable takes
          else: sys.exit(f'settings.tsv:{n}: unknown kind {kind}')
          out.append(s)

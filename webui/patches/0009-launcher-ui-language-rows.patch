@@ -1,6 +1,8 @@
+diff --git a/dm/ios/Sources/LauncherRow.swift b/dm/ios/Sources/LauncherRow.swift
+index 82fa3b3c..01f1976e 100644
 --- a/dm/ios/Sources/LauncherRow.swift
 +++ b/dm/ios/Sources/LauncherRow.swift
-@@ -12,8 +12,8 @@
+@@ -12,8 +12,8 @@ struct SettingRow: View {
  
      private var locked: Bool { m.fixed.contains(s.env) }
      private var note: String {
@@ -11,7 +13,7 @@
      }
      private var rangeValue: Binding<Double> {
          Binding(get: { Double(m.values[s.env] ?? s.def) ?? s.max ?? 1 },
-@@ -23,7 +23,7 @@
+@@ -23,7 +23,7 @@ struct SettingRow: View {
  
      private var settingLabel: some View {
          VStack(alignment: .leading, spacing: 4) {
@@ -20,7 +22,7 @@
              if !note.isEmpty { Text(note).font(.footnote).foregroundStyle(.secondary) }
          }
      }
-@@ -33,7 +33,7 @@
+@@ -33,7 +33,7 @@ struct SettingRow: View {
              switch s.kind {
              case "choice":
                  Picker(selection: m.binding(s)) {
@@ -29,7 +31,7 @@
                  } label: {
                      settingLabel
                  }
-@@ -46,7 +46,7 @@
+@@ -46,7 +46,7 @@ struct SettingRow: View {
                          Text(percentage).monospacedDigit().foregroundStyle(.secondary)
                      }
                      Slider(value: rangeValue, in: (s.min ?? 0)...(s.max ?? 1), step: s.step ?? 0.05)

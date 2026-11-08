@@ -1,6 +1,8 @@
+diff --git a/dm/ios/Sources/LauncherSettings.swift b/dm/ios/Sources/LauncherSettings.swift
+index aec4414c..0452827e 100644
 --- a/dm/ios/Sources/LauncherSettings.swift
 +++ b/dm/ios/Sources/LauncherSettings.swift
-@@ -32,7 +32,7 @@
+@@ -32,7 +32,7 @@ struct Setting: Decodable, Identifiable {
      }
      enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, needs, level, base, options, min, max, step, on, off }
  }
@@ -9,7 +11,7 @@
  
  final class LauncherModel: ObservableObject {
      let settings: [Setting]
-@@ -41,10 +41,23 @@
+@@ -41,10 +41,23 @@ final class LauncherModel: ObservableObject {
      let ignoreSaved: Bool   // DM_SAVED_CHOICES=0: start from the defaults, and leave the saved choices as they are
      @Published var values: [String: String] = [:]
  

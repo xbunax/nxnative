@@ -20,7 +20,7 @@ concurrency:
 
 env:
   # The same toolchain and test profile as upstream's tests.yml (dm/tools/tests/test_ci_toolchain.py keeps those in step)
-  DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+  DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
   GAME: 010015100B514000
   PYTHONUTF8: '1'
 

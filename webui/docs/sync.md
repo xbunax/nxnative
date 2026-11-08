@@ -11,6 +11,25 @@ vendor-drop equivalent is `sync/upstream-20261024`, the ported hooks are on
 `hooks/upstream-20261024`, and the pre-sync main is preserved on
 `backup/main-before-upstream-20261024`.
 
+The 2026-11-08 manual sync merges upstream `1794a35a` (570 commits since
+`39509760`) into fork main `d1ba3e97`, on `sync/upstream-20261108`. The nine
+hooks were ported on `hooks/upstream-20261108`; upstream-owned sources remain
+unchanged except the fullscreen key in `dm/ios/project.yml`. The ObjC launcher
+now ports cloud-save folder selection, the live in-game menu, multi-program
+settings paths and the hosting controller's orientation policy. ObjC stages
+remove both new Swift files as well as the three original launcher files.
+
+Windows follows upstream's new tool_lock.py checks, SQLite shader cache and
+shader images (expanded for the existing Windows packer). Its host build adds
+the dav1d decoder, generated host Metal libraries with the source-only fallback,
+and a Foundation implementation of clang's OS-availability helper, since the
+Windows LLVM bundle has no Darwin compiler-rt. The fork CI uses upstream's
+Xcode 27.2. Validation: 174 WebUI tests (two platform/tool skips), 15 upstream
+documentation/toolchain tests, the patched extractor build (zero warnings and
+errors), 263 iOS source compiles and a verified unsigned link with synthetic
+embedded modules. No game or device was run; see
+`upstream-sync-20261108.json` for the recorded scope.
+
 Upstream-owned files are pristine except `dm/ios/project.yml`, so a normal
 merge is clean: the fork tree (`webui/`, `FORK.md` and the root launchers) does not overlap
 upstream. The root `.gitattributes` is shared: upstream's lines first, then a

@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import tempfile
 import types
+import sys
 import unittest
 from unittest.mock import Mock
 
@@ -12,34 +13,40 @@ from webui.file_tools import remove_stage
 class WindowsShaderCachePaths(unittest.TestCase):
     def test_publish_and_reuse_library_beyond_max_path(self):
         # Exercise the real pinned cache implementation with its Windows adapter.
-        source = (Path(__file__).resolve().parents[2] / 'dm/gfx/tools/dmsh_mtlcache.py').read_text(encoding='utf-8')
+        source_path = Path(__file__).resolve().parents[2] / 'dm/gfx/tools/dmsh_mtlcache.py'
+        source = source_path.read_text(encoding='utf-8')
         line = next(row for row in source.splitlines() if row.startswith('_clonefile ='))
         module = types.ModuleType('regression_shader_cache')
+        module.__file__ = str(source_path)
         exec(compile(source.replace(line, '_clonefile = None'), '<shader-cache>', 'exec'), module.__dict__)
         module.compiler_id = lambda sdk: 'fixture compiler identity'
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            nested = root / ('repository-' + 'x' * 80) / '.webui-data/tasks' / ('a' * 32) / 'inputs/0100A00019DE0000_build/windows_shaders'
+            nested = root / ('repository-' + 'x' * 120) / '.webui-data/tasks' / ('a' * 32) / 'inputs/0100A00019DE0000_build/windows_shaders'
             cache_root = cache_directory(nested)
             msl = root / 'source.metal'; msl.write_bytes(b'fixture MSL')
             library = root / 'result.metallib'
             def compile_library(msl, air, output):
                 Path(output).write_bytes(b'fixture compiled library')
             compiler = Mock(side_effect=compile_library)
-            cache = module.Cache(os.path.join(cache_root, 'metallib'), {'mac': ('macosx', 'fixture flags', compiler)}, str(root))
+            sys.path.insert(0, str(source_path.parents[2] / 'tools'))
+            from shader_cache import Store
+            store = Store(cache_root)
+            cache = module.Cache(store, {'mac': ('macosx', 'fixture flags', compiler)}, str(root))
             cached = cache.path('mac', msl.read_bytes())
-            self.assertGreater(len(cached), 260)
             try:
+                self.assertGreater(len(cache_root), 260)
                 cache.compile('mac', str(msl), str(library))
-                self.assertEqual(Path(cached).read_bytes(), b'fixture compiled library')
+                self.assertEqual(store.get(cached), b'fixture compiled library')
                 library.unlink()
                 cache.compile('mac', str(msl), str(library))
                 self.assertEqual(library.read_bytes(), b'fixture compiled library')
                 compiler.assert_called_once()
                 self.assertEqual(cache.stats['mac', 'reused'], 1)
-                self.assertFalse(list(Path(cached).parent.glob('*.tmp-*')))
+                self.assertFalse(list(root.glob('result.metallib.tmp-*')))
             finally:
-                remove_stage(root / ('repository-' + 'x' * 80), root)
+                store.close()
+                remove_stage(root / ('repository-' + 'x' * 120), root)
 
     def test_explicit_shared_cache_is_used_instead_of_task_folder(self):
         with tempfile.TemporaryDirectory() as directory:

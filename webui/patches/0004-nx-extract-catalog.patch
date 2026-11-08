@@ -1,11 +1,11 @@
 diff --git a/dm/tools/nx_extract/Program.cs b/dm/tools/nx_extract/Program.cs
-index e8c1392..b8521f3 100644
+index 6b80d1c6..f6be31b0 100644
 --- a/dm/tools/nx_extract/Program.cs
 +++ b/dm/tools/nx_extract/Program.cs
-@@ -30,6 +30,10 @@ static class P {
-     [DllImport("libc", SetLastError = true)] static extern int clonefile(string src, string dst, uint flags);
+@@ -53,6 +53,10 @@ static class P {
+     }
  
-     static int Main(string[] a) {
+     static int Run(string[] a) {
 +        if (a.Length == 3 && a[1] == "--catalog") {
 +            try { return Catalog(a[0], a[2]); }
 +            catch { Console.Error.WriteLine("Package metadata could not be read; check keys and integrity."); return 2; }
@@ -13,7 +13,7 @@ index e8c1392..b8521f3 100644
          bool manifest = Array.IndexOf(a, "--manifest") >= 0; a = Array.FindAll(a, s => s != "--manifest");
          bool image = Array.IndexOf(a, "--romfs-image") >= 0; a = Array.FindAll(a, s => s != "--romfs-image");
          g_allow = Array.IndexOf(a, "--allow-damaged") >= 0; a = Array.FindAll(a, s => s != "--allow-damaged");
-@@ -155,6 +159,43 @@ static class P {
+@@ -347,6 +351,43 @@ static class P {
          return r;
      }
  

@@ -55,8 +55,9 @@ def filesystem_path(path):
 
 
 def cache_directory(output, directory=None):
-    """Keep Python-only shader cache IO usable beyond Windows MAX_PATH."""
-    return filesystem_path(directory or Path(output) / 'mac/cas')
+    """Keep the upstream SQLite shader cache usable beyond Windows MAX_PATH."""
+    path = Path(directory or Path(output) / 'mac/cas')
+    return filesystem_path(path if path.suffix == '.db' else path / 'cas.db')
 
 
 def publish_chain_header(output, profile):
@@ -90,8 +91,28 @@ def main():
     (tools.parent / 'nvn').mkdir(exist_ok=True)
     for p in original.glob('dmsh_*.py'):
         shutil.copyfile(p, tools / p.name)
-    for name in ('c1_guard.py', 'cb_extent.py'):
+    for name in ('c1_guard.py', 'cb_extent.py', 'tool_lock.py', 'shader_regressions.py'):
         shutil.copyfile(original / name, tools / name)
+    # Cache and shader images now use the shared tool modules.
+    shared = root / 'chain/tools'
+    shared.mkdir(parents=True, exist_ok=True)
+    for p in (repo / 'dm/tools').glob('*.py'):
+        shutil.copyfile(p, shared / p.name)
+    romfs = shared / 'romfs.py'
+    src = replace(romfs.read_text(encoding='utf-8'), '_os.pread(self.fd, size, self.start + self.pos)',
+                  '_windows_pread(self.fd, size, self.start + self.pos)')
+    src += '''
+
+def _windows_pread(fd, size, offset):
+    # A separate mapping preserves each reader's position without a shared seek.
+    size = min(size, max(0, _os.fstat(fd).st_size - offset))
+    if not size:
+        return b''
+    delta = offset % _mmap.ALLOCATIONGRANULARITY
+    with _mmap.mmap(fd, size + delta, access=_mmap.ACCESS_READ, offset=offset - delta) as view:
+        return view[delta:delta + size]
+'''
+    romfs.write_text(src, encoding='utf-8')
     for folder in ('dmsh_xlate',):
         shutil.copytree(filesystem_path(original / folder), filesystem_path(tools / folder), dirs_exist_ok=True)
     # Some Ryujinx.Common filenames exceed MAX_PATH under real task folders.
@@ -117,7 +138,8 @@ def main():
     build = (tools / 'dmsh_build.py').read_text(encoding='utf-8')
     build = metal_command(build, 'MAC_METAL', metal, 'air64-apple-macos14.0', cache)
     build = replace(build, "'; xcrun -sdk macosx metallib'", repr('; ' + metallib))
-    build = replace(build, "['xcrun', '-sdk', 'macosx', 'metallib', air, '-o', lib]", repr([metallib]) + " + [air, '-o', lib]")
+    build = replace(build, "[xcrun_out('-f', 'metal'), '-isysroot', xcrun_out('--show-sdk-path'), *MAC_METAL[4:]]", 'MAC_METAL')
+    build = replace(build, "[xcrun_out('-f', 'metallib')]", repr([metallib]))
     build = replace(build, '[XLATE, jp, w]', repr([dotnet, dll]) + ' + [jp, w]')
     (tools / 'dmsh_build.py').write_text(build, encoding='utf-8')
     ip = root / 'chain/ios/tools/ios_metal.py'
@@ -134,12 +156,15 @@ def main():
                            for x in (metal, metallib, sc)}, sort_keys=True)
     src = src[:start] + 'def compiler_id(sdk):\n    return sdk + ' + repr(identity) + '\n' + src[end:]
     cp.write_text(src, encoding='utf-8')
-    cp = tools / 'dmsh_chain.py'
+    cp = tools / 'tool_lock.py'
     src = cp.read_text(encoding='utf-8')
     src = replace(src, "[os.path.join(XLATE_DIR, 'dmsh_xlate'), '--source-sha']", repr([dotnet, dll, '--source-sha']))
     src = replace(src, "['xcrun', '-sdk', sdk, 'metal', '--version']", repr([metal, '--version']))
     src = replace(src, '    return t\n', '    t["windows_tools"] = ' + repr(identity) + '\n    return t\n')
-    src = replace(src, "'tools/dmsh_chain.lock']", "'tools/dmsh_chain.lock', 'tools/windows_shader_build.py', 'tools/dmsh_mtlcache.py']")
+    cp.write_text(src, encoding='utf-8')
+    cp = tools / 'dmsh_chain.py'
+    src = replace(cp.read_text(encoding='utf-8'), "'tools/dmsh_chain.lock']",
+                  "'tools/dmsh_chain.lock', 'tools/windows_shader_build.py', 'tools/dmsh_mtlcache.py']")
     cp.write_text(src, encoding='utf-8')
     # Windows indexers can briefly hold a newly written cache file without
     # delete sharing. Retry the same atomic operation; never discard a failure.
@@ -166,7 +191,7 @@ def windows_replace(source, destination):
     shutil.copyfile(__file__, tools / 'windows_shader_build.py')
     env = dict(os.environ, DM_GAME=str(a.profile.resolve()), XLATE=str(Path(dll).with_suffix('')),
                SPIRV_CROSS=sc, PYTHONUTF8='1', J=str(a.jobs), IOSOUT=str(root / 'ios'), WORK=str(root / 'work'),
-               DOTNET_ROOT=str(a.dotnet.resolve().parent),
+               DOTNET_ROOT=str(a.dotnet.resolve().parent), DMSH_PCH='0',
                DOTNET_CLI_UI_LANGUAGE='en', DOTNET_CLI_TELEMETRY_OPTOUT='1',
                DOTNET_SKIP_FIRST_TIME_EXPERIENCE='1', DOTNET_GENERATE_ASPNET_CERTIFICATE='false',
                DOTNET_CLI_HOME=os.environ.get('DOTNET_CLI_HOME', str(root / '.dotnet')),
@@ -187,13 +212,18 @@ def windows_replace(source, destination):
     subprocess.run([dotnet, 'publish', str(tools / 'dmsh_xlate/dmsh_xlate.csproj'),
                     '-c', 'Release', '-o', str(Path(dll).parent), '--self-contained', 'false',
                     '-p:PublishReadyToRun=false', '-p:UseAppHost=false'], env=env, check=True)
-    subprocess.run([sys.executable, str(cp), '--update-lock'], env=env, check=True)
-    subprocess.run([sys.executable, str(cp), '--check-tools'], env=env, check=True)
+    subprocess.run([sys.executable, str(tools / 'tool_lock.py'), '--update-lock'], env=env, check=True)
+    subprocess.run([sys.executable, str(tools / 'tool_lock.py'), '--check-tools'], env=env, check=True)
     subprocess.run([sys.executable, str(cp), '--header'], env=env, check=True)
     publish_chain_header(root, a.profile.resolve())
     (root / 'windows_tools.json').write_text(identity + '\n', encoding='utf-8')
     if not a.prepare_only:
         subprocess.run([sys.executable, str(tools / 'dmsh_build.py'), str(a.packages.resolve()), str(root / 'mac'), *a.keys], env=env, check=True)
+        # Keep the Windows packer's folder input; upstream builds shader images.
+        chain = runpy.run_path(str(cp))['version']()
+        for target in ('mac', 'ios'):
+            subprocess.run([sys.executable, str(shared / 'shader_lib.py'), 'expand',
+                            str(root / target / ('b-' + chain))], env=env, check=True)
 
 
 if __name__ == '__main__':

@@ -37,6 +37,9 @@ def base_info_plist(*, game_id, display_name, app_version, app_category):
         LSSupportsOpeningDocumentsInPlace=True,
         UISupportedInterfaceOrientations=['UIInterfaceOrientationLandscapeRight',
                                           'UIInterfaceOrientationLandscapeLeft'],
+        **{'UISupportedInterfaceOrientations~ipad': ['UIInterfaceOrientationPortrait',
+            'UIInterfaceOrientationPortraitUpsideDown', 'UIInterfaceOrientationLandscapeRight',
+            'UIInterfaceOrientationLandscapeLeft']},
         UIRequiresFullScreen=True,
         UIStatusBarHidden=True,
         UIViewControllerBasedStatusBarAppearance=False,
@@ -51,6 +54,8 @@ def base_info_plist(*, game_id, display_name, app_version, app_category):
                 UIWindowSceneSessionRoleApplication=[
                     dict(UISceneConfigurationName='Default',
                          UISceneDelegateClassName='SceneDelegate')],
+                UIWindowSceneSessionRoleExternalDisplayNonInteractive=[
+                    dict(UISceneConfigurationName='TV', UISceneDelegateClassName='DmTVSceneDelegate')],
             ),
         ),
     )

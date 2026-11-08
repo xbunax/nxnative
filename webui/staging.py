@@ -34,6 +34,8 @@ OBJC_REMOVED = (
     'dm/ios/Sources/Launcher.swift',
     'dm/ios/Sources/LauncherRow.swift',
     'dm/ios/Sources/LauncherSettings.swift',
+    'dm/ios/Sources/GameMenu.swift',
+    'dm/ios/Sources/DmHostingController.swift',
 )
 
 SKIP_DIR_NAMES = {'.git', '.webui-data', '.claude', '__pycache__', '.venv', 'venv', 'node_modules'}
