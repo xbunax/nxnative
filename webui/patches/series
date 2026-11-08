@@ -1,6 +1,6 @@
 # <patch file> <repository-relative target>
-# Base: 1794a35a1a2462a75cb1730eee29d32fac81248c
-# Fork ref: d1ba3e97876da86ff616c6d8e8d684b968fb8c5d
+# Base: 651369bc7e160ef01ee7328ccef56cce93b3e046
+# Fork ref: 2b015912760dea795c45b268d4fbe9445245c3af
 0001-shader-split-posix-paths.patch dm/gfx/tools/shader_split.py
 0002-gen-embed-posix-paths-sections.patch dm/ios/tools/gen_embed.py
 0003-hle-count-targetconditionals.patch dm/host/hle_count.c

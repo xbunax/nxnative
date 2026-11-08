@@ -3,6 +3,17 @@
 The WebUI is the fork-owned local build studio. Upstream nxnative code stays at
 its original paths; everything here is safe to change without touching upstream.
 
+## Game support
+
+The [game gallery](../README.md#games) and [detailed game table](../dm/games/README.md#games)
+are synchronized from upstream. Each game links its tested builds, platforms,
+progress and known issues; a Mac gameplay test does not imply an iPhone test.
+
+Windows builds support the offline NVN subset described in the
+[platform limits](docs/webui.md#tools-and-platforms). Switch 2 games listed by
+upstream are tested on Mac only; use the upstream [Switch 2 build instructions](../README.md#switch-2-games).
+The WebUI package picker currently accepts NSP/XCI/NSZ, not NUP containers.
+
 ## Start the WebUI
 
 Clone or download this fork, then open its repository folder:

@@ -30,6 +30,11 @@ errors), 263 iOS source compiles and a verified unsigned link with synthetic
 embedded modules. No game or device was run; see
 `upstream-sync-20261108.json` for the recorded scope.
 
+The README follow-up on the same day merges upstream `651369bc`, including
+its --shader-files installation option and matching packer tests. The root
+README, game table and gallery data match upstream; FORK.md and webui/README.md
+link to them and explain platform coverage instead of maintaining another list.
+
 Upstream-owned files are pristine except `dm/ios/project.yml`, so a normal
 merge is clean: the fork tree (`webui/`, `FORK.md` and the root launchers) does not overlap
 upstream. The root `.gitattributes` is shared: upstream's lines first, then a

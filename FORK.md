@@ -5,6 +5,12 @@ Upstream code lives at its original paths (`dm/`, `scripts/`, `docs/`, `README.m
 and is kept clean so that upstream can be fetched and merged without carrying fork
 changes in every file.
 
+Game support is listed in the upstream [game gallery](README.md#games) and
+[game table](dm/games/README.md#games), kept in sync with this fork. Read each
+game's note for tested platforms and limitations. The Windows builder supports
+the [offline NVN subset](webui/docs/webui.md#tools-and-platforms); Switch 2
+gameplay is currently tested on Mac only.
+
 Fork-owned code lives under `webui/`, with the root launchers and `FORK.md`
 beside it and the upstream-sync workflow under `.github/`:
 
