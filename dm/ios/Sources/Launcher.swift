@@ -100,17 +100,24 @@ private struct LauncherView: View {
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
-                VStack(spacing: 16) {
+                VStack(spacing: 12) {
                     if let icon = appIcon() {
-                        Image(uiImage: icon).resizable().frame(width: 96, height: 96)
+                        Image(uiImage: icon).resizable().frame(width: 80, height: 80)
                             .clipShape(RoundedRectangle(cornerRadius: 22))
                             .accessibilityHidden(true)
                     }
-                    Text((info("CFBundleDisplayName") as? String) ?? "Game")
+                    Text((info("CFBundleDisplayName") as? String) ?? m.text("Game"))
                         .font(.title.weight(.bold)).multilineTextAlignment(.center)
-                    Text("Version \((info("CFBundleShortVersionString") as? String) ?? "")")
+                    Text("\(m.text("Version")) \((info("CFBundleShortVersionString") as? String) ?? "")")
                         .font(.callout).foregroundStyle(.secondary)
                     playButton
+                    VStack(spacing: 0) {
+                        Text(m.text("Interface language")).font(.caption).foregroundStyle(.secondary)
+                        Picker(m.text("Interface language"), selection: $m.uiLanguage) {
+                            Text("English").tag("en")
+                            Text("\u{7B80}\u{4F53}\u{4E2D}\u{6587}").tag("zh-Hans")
+                        }.pickerStyle(.menu).labelsHidden()
+                    }
                 }
                 .padding(16)
                 .frame(width: geometry.size.width / 3, height: geometry.size.height)
@@ -118,21 +125,21 @@ private struct LauncherView: View {
                     ForEach(m.sections, id: \.self) { section in
                         let rows = m.rows(in: section)
                         if !rows.isEmpty {
-                            Section(section) {
+                            Section(m.text(section)) {
                                 ForEach(rows) { SettingRow(s: $0, m: m) }
                             }
                         }
                     }
                     Section {
-                        Button("Reset to tested defaults") { m.reset() }
+                        Button(m.text("Reset to tested defaults")) { m.reset() }
                             .disabled(!m.changed)
                     } footer: {
-                        Text("Brings back all settings this game was tested with.")
+                        Text(m.text("Brings back all settings this game was tested with."))
                     }
                     CloudSavesSection()
                     Section {
                         HStack {
-                            Text("Memory available")
+                            Text(m.text("Memory available"))
                             Spacer()
                             Text(ByteCountFormatter.string(fromByteCount: Int64(memory), countStyle: .memory)).monospacedDigit().foregroundStyle(.secondary)
                         }
@@ -153,7 +160,7 @@ private struct LauncherView: View {
     }
 
     @ViewBuilder var playButton: some View {
-        let button = Button(action: play) { Text("Play").font(.title3.weight(.semibold)).frame(maxWidth: 220) }.controlSize(.large)
+        let button = Button(action: play) { Text(m.text("Play")).font(.title3.weight(.semibold)).frame(maxWidth: 220) }.controlSize(.large)
         if #available(iOS 26.0, *) { button.buttonStyle(.glassProminent) } else { button.buttonStyle(.borderedProminent) }
     }
 
@@ -172,7 +179,7 @@ public func dmShowLauncher(_ viewController: UnsafeMutableRawPointer, _ done: @c
     let dir = getenv("DM_APP_DM").map { URL(fileURLWithPath: String(cString: $0)) } ?? Bundle.main.resourceURL?.appendingPathComponent("dm")
     guard let url = dir?.appendingPathComponent("launcher.json"), let data = try? Data(contentsOf: url) else { return false }
     guard let file = try? JSONDecoder().decode(SettingsFile.self, from: data), !file.settings.isEmpty else { fputs("[RED] launcher: dm/launcher.json cannot be read; starting the game\n", stderr); return false }
-    let model = LauncherModel(file.settings)
+    let model = LauncherModel(file.settings, translations: file.uiTranslations ?? [:])
     gameMenuModel = model   // the in-game menu shows and saves the same choices (GameMenu.swift)
     if ProcessInfo.processInfo.environment["DM_LAUNCHER"] == "0" { fputs("launcher: off (DM_LAUNCHER=0)\n", stderr); model.applySaved(); return false }
     let parent = Unmanaged<UIViewController>.fromOpaque(viewController).takeUnretainedValue()

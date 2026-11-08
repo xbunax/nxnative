@@ -32,7 +32,7 @@ struct Setting: Decodable, Identifiable {
     }
     enum CodingKeys: String, CodingKey { case env, kind, label, note, def = "default", section, needs, level, base, options, min, max, step, on, off }
 }
-struct SettingsFile: Decodable { let settings: [Setting] }
+struct SettingsFile: Decodable { let settings: [Setting]; let uiTranslations: [String: String]? }
 
 final class LauncherModel: ObservableObject {
     let settings: [Setting]
@@ -41,10 +41,23 @@ final class LauncherModel: ObservableObject {
     let ignoreSaved: Bool   // DM_SAVED_CHOICES=0: start from the defaults, and leave the saved choices as they are
     @Published var values: [String: String] = [:]
 
+    // Interface language is independent of every game setting and env override.
+    @Published var uiLanguage: String {
+        didSet { defaults.set(uiLanguage, forKey: "launcher.uiLanguage") }
+    }
+    private let uiTranslations: [String: String]
+    func text(_ english: String) -> String {
+        uiLanguage == "zh-Hans" ? (uiTranslations[english] ?? english) : english
+    }
+
     private let defaults: UserDefaults
 
-    init(_ settings: [Setting], defaults: UserDefaults = .standard) {
+    init(_ settings: [Setting], defaults: UserDefaults = .standard, translations: [String: String] = [:]) {
         self.defaults = defaults
+        self.uiTranslations = translations
+        let savedUI = defaults.string(forKey: "launcher.uiLanguage")
+        self.uiLanguage = ["en", "zh-Hans"].contains(savedUI ?? "") ? savedUI! :
+            (Locale.preferredLanguages.first?.hasPrefix("zh") == true ? "zh-Hans" : "en")
         self.settings = settings
         let env = ProcessInfo.processInfo.environment
         fromLaunch = Set((env["DM_ENV_LAUNCH_KEYS"] ?? "").split(separator: " ").map(String.init))
