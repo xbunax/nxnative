@@ -129,7 +129,8 @@ def build(gid, patched, control):
             s.update(on=on_off[0], off=on_off[1], default=on_off[0] if s['default'] == '1' else on_off[1])   # the default as the value the variable takes
         else: sys.exit(f'settings.tsv:{n}: unknown kind {kind}')
         out.append(s)
-    return {'schema': SCHEMA, 'game': g.id, 'settings': out}
+    translations = json.loads((HERE.parents[1] / 'webui/localization/launcher.zh-Hans.json').read_text(encoding='utf-8'))
+    return {'schema': SCHEMA, 'game': g.id, 'settings': out, 'uiTranslations': translations}
 
 
 if __name__ == '__main__':
